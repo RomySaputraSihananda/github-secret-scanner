@@ -6,6 +6,7 @@ mod config;
 mod events;
 mod npm;
 mod pastebin;
+mod pypi;
 mod poller;
 mod validator;
 
@@ -82,11 +83,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         async move { npm_scan_loop(kw, c, v, a, al).await; }
     });
 
+    let pypi_task = tokio::spawn({
+        let (c, v, a, al) = (cache.clone(), validator.clone(), alchemy.clone(), alerter.clone());
+        async move { pypi_scan_loop(c, v, a, al).await; }
+    });
+
     tokio::select! {
         _ = keyword_task => error!("Keyword scan task exited unexpectedly"),
         _ = events_task => error!("Events scan task exited unexpectedly"),
         _ = pastebin_task => error!("Pastebin scan task exited unexpectedly"),
         _ = npm_task => error!("npm scan task exited unexpectedly"),
+        _ = pypi_task => error!("PyPI scan task exited unexpectedly"),
     }
 
     Ok(())
@@ -285,6 +292,37 @@ async fn npm_scan_loop(
         }
 
         info!("[npm] Cycle complete. Sleeping 300s");
+        tokio::time::sleep(Duration::from_secs(300)).await;
+    }
+}
+
+async fn pypi_scan_loop(
+    cache: SharedCache,
+    validator: SharedValidator,
+    alchemy: SharedAlchemy,
+    alerter: SharedAlerter,
+) {
+    let scanner = pypi::PypiScanner::new();
+    loop {
+        match scanner.scan_recent().await {
+            Ok(files) => {
+                if !files.is_empty() {
+                    info!("[pypi] Found {} sensitive files", files.len());
+                }
+                for file in files {
+                    let cache_key = format!("pypi/{}/{}", file.package, file.filename);
+                    { if cache.lock().await.is_seen(&cache_key) { continue; } }
+
+                    let result = analyzer::analyze(&file.content);
+                    if result.found {
+                        process_finding(&validator, &alchemy, &alerter, &format!("pypi:{}", file.package), &file.filename, &result.secrets, &file.content, &file.url, "[pypi]").await;
+                    }
+                    cache.lock().await.mark_seen(&cache_key).ok();
+                }
+            }
+            Err(e) => warn!("[pypi] Error: {}", e),
+        }
+        info!("[pypi] Cycle complete. Sleeping 300s");
         tokio::time::sleep(Duration::from_secs(300)).await;
     }
 }
