@@ -49,10 +49,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         for keyword in &cfg.github.keywords {
             info!("Searching keyword: {}", keyword);
 
+            // 2 detik antar request — GitHub rate limit 30 req/menit authenticated
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
             let items = match poller.search(keyword).await {
                 Ok(items) => items,
                 Err(e) => {
-                    warn!("GitHub search error for '{}': {}", keyword, e);
+                    let msg = e.to_string();
+                    if msg.contains("rate limit") || msg.contains("429") || msg.contains("403") {
+                        warn!("GitHub rate limit hit — pause 60s");
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                    } else {
+                        warn!("GitHub search error for '{}': {}", keyword, e);
+                    }
                     continue;
                 }
             };

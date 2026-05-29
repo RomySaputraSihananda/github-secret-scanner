@@ -52,7 +52,7 @@ impl Poller {
         }
     }
 
-    pub async fn search(&self, keyword: &str) -> Result<Vec<SearchItem>, reqwest::Error> {
+    pub async fn search(&self, keyword: &str) -> Result<Vec<SearchItem>, Box<dyn std::error::Error + Send + Sync>> {
         // Hanya repo yang di-push dalam 7 hari terakhir
         let since = (chrono::Utc::now() - chrono::Duration::days(7))
             .format("%Y-%m-%d")
@@ -76,7 +76,19 @@ impl Poller {
         }
 
         let resp = req.send().await?;
-        let search_resp: SearchResponse = resp.json().await?;
+        let status = resp.status();
+        let body = resp.text().await?;
+
+        if status.as_u16() == 403 || status.as_u16() == 429 {
+            return Err(format!("GitHub rate limit ({}): {}", status, &body[..body.len().min(200)]).into());
+        }
+
+        if !status.is_success() {
+            return Err(format!("GitHub error {}: {}", status, &body[..body.len().min(200)]).into());
+        }
+
+        let search_resp: SearchResponse = serde_json::from_str(&body)
+            .map_err(|e| format!("JSON decode: {e} — body: {}", &body[..body.len().min(200)]))?;
         Ok(search_resp.items)
     }
 
