@@ -11,7 +11,9 @@ use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .init();
 
     let cfg = config::load("config.toml")?;
     let cache = cache::Cache::new("scanner.db")?;
