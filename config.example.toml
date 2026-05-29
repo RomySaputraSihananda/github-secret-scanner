@@ -1,0 +1,18 @@
+[github]
+token = ""          # optional — increases rate limit from 10 to 30 req/min
+keywords = [
+  "solana private key",
+  "PRIVATE_KEY=",
+  "phantom wallet seed",
+  "secret_key solana",
+  "id_keypair",
+]
+interval_secs = 120
+
+[openrouter]
+api_key = ""
+model = "meta-llama/llama-3.1-8b-instruct:free"
+
+[telegram]
+bot_token = ""
+chat_id = ""
