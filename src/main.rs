@@ -165,24 +165,22 @@ async fn send_with_alchemy(
     content: &str,
     link: &str,
 ) {
+    // Alchemy hanya enrichment — selalu alert, tambah info wallet kalau ada
+    let mut enriched = secrets.to_vec();
     match alchemy.validate(content).await {
         Some(chain) if chain.is_active => {
-            info!("Alchemy confirmed wallet {} ({:.4} SOL)", chain.address, chain.balance_sol);
-            let mut enriched = secrets.to_vec();
-            enriched.push(format!("Wallet: `{}` — {:.4} SOL", chain.address, chain.balance_sol));
-            if let Err(e) = alerter.send(repo, path, &enriched, content, link).await {
-                error!("Telegram alert failed: {}", e);
-            }
+            info!("Alchemy: wallet {} aktif ({:.4} SOL)", chain.address, chain.balance_sol);
+            enriched.push(format!("🔑 Wallet: `{}` — *{:.4} SOL* (mainnet aktif)", chain.address, chain.balance_sol));
         }
         Some(chain) => {
-            info!("Wallet {} inactive (0 SOL, no tx) — skip", chain.address);
+            info!("Alchemy: wallet {} tidak aktif di mainnet (mungkin devnet)", chain.address);
+            enriched.push(format!("🔑 Wallet: `{}` — 0 SOL (devnet/inactive)", chain.address));
         }
         None => {
-            // Tidak bisa extract Solana wallet (mungkin ETH key / API key) — alert langsung
-            info!("No Solana wallet extractable, alerting directly for {}/{}", repo, path);
-            if let Err(e) = alerter.send(repo, path, secrets, content, link).await {
-                error!("Telegram alert failed: {}", e);
-            }
+            info!("Alchemy: tidak ada Solana wallet di snippet");
         }
+    }
+    if let Err(e) = alerter.send(repo, path, &enriched, content, link).await {
+        error!("Telegram alert failed: {}", e);
     }
 }
