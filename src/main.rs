@@ -3,6 +3,7 @@ mod analyzer;
 mod cache;
 mod config;
 mod poller;
+mod validator;
 
 use std::time::Duration;
 use tracing::{error, info, warn};
@@ -14,6 +15,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = config::load("config.toml")?;
     let cache = cache::Cache::new("scanner.db")?;
     let poller = poller::Poller::new(cfg.github.token.clone());
+    let validator = validator::Validator::new(
+        cfg.openrouter.api_key.clone(),
+        cfg.openrouter.model.clone(),
+    );
     let alerter = alerter::Alerter::new(
         cfg.telegram.bot_token.clone(),
         cfg.telegram.chat_id.clone(),
@@ -66,18 +71,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if !content.is_empty() {
                         let result = analyzer::analyze(&content);
                         if result.found {
-                            info!("Secret in file {}/{}", item.repository.full_name, item.path);
-                            if let Err(e) = alerter
-                                .send(
-                                    &item.repository.full_name,
-                                    &item.path,
-                                    &result.secrets,
-                                    &content,
-                                    &item.html_url,
-                                )
-                                .await
-                            {
-                                error!("Telegram alert failed: {}", e);
+                            match validator.validate(&content, &result.secrets).await {
+                                Ok(v) if v.is_real => {
+                                    info!("Confirmed secret in file {}/{}: {}", item.repository.full_name, item.path, v.reason);
+                                    if let Err(e) = alerter
+                                        .send(
+                                            &item.repository.full_name,
+                                            &item.path,
+                                            &result.secrets,
+                                            &content,
+                                            &item.html_url,
+                                        )
+                                        .await
+                                    {
+                                        error!("Telegram alert failed: {}", e);
+                                    }
+                                }
+                                Ok(v) => {
+                                    info!("False positive in {}/{}: {}", item.repository.full_name, item.path, v.reason);
+                                }
+                                Err(e) => {
+                                    warn!("Validator error for {}/{}: {}", item.repository.full_name, item.path, e);
+                                }
                             }
                         }
                         cache.mark_seen(&file_key)?;
@@ -124,18 +139,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         let result = analyzer::analyze(&added);
                         if result.found {
-                            info!("Secret in commit {}/{} ({})", repo, file.filename, &commit.sha[..8]);
-                            if let Err(e) = alerter
-                                .send(
-                                    repo,
-                                    &file.filename,
-                                    &result.secrets,
-                                    &added,
-                                    &commit.html_url,
-                                )
-                                .await
-                            {
-                                error!("Telegram alert failed: {}", e);
+                            match validator.validate(&added, &result.secrets).await {
+                                Ok(v) if v.is_real => {
+                                    info!("Confirmed secret in commit {}/{} ({}): {}", repo, file.filename, &commit.sha[..8], v.reason);
+                                    if let Err(e) = alerter
+                                        .send(
+                                            repo,
+                                            &file.filename,
+                                            &result.secrets,
+                                            &added,
+                                            &commit.html_url,
+                                        )
+                                        .await
+                                    {
+                                        error!("Telegram alert failed: {}", e);
+                                    }
+                                }
+                                Ok(v) => {
+                                    info!("False positive in commit {}/{}: {}", repo, file.filename, v.reason);
+                                }
+                                Err(e) => {
+                                    warn!("Validator error for commit {}: {}", commit.sha, e);
+                                }
                             }
                         }
                     }
