@@ -4,7 +4,7 @@ use reqwest::Client;
 use std::collections::HashSet;
 
 static PASTE_KEY_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"href="/([A-Za-z0-9]{8})""#).unwrap()
+    Regex::new(r#"href="/([A-Za-z0-9]{8})\?source=archive""#).unwrap()
 });
 
 pub struct PastebinPoller {
@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn test_paste_key_regex() {
-        let html = r#"<td><a href="/abc12345">title</a></td><a href="/XYZ98765">other</a>"#;
+        let html = r#"<a href="/abc12345?source=archive">title</a><a href="/XYZ98765?source=archive">other</a>"#;
         let keys: Vec<String> = PASTE_KEY_RE
             .captures_iter(html)
             .map(|c| c[1].to_string())
