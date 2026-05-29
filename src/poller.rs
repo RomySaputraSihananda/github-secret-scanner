@@ -147,7 +147,6 @@ mod tests {
     #[test]
     fn test_raw_url_conversion() {
         let item = SearchItem {
-            name: "file.rs".to_string(),
             path: "src/file.rs".to_string(),
             sha: "abc".to_string(),
             html_url: "https://github.com/owner/repo/blob/main/src/file.rs".to_string(),
