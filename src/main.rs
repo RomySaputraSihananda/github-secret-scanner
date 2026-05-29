@@ -4,7 +4,6 @@ mod analyzer;
 mod cache;
 mod config;
 mod events;
-mod gitlab;
 mod poller;
 mod validator;
 
@@ -66,34 +65,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         keyword_scan_loop(keywords, interval_secs, cache2, poller2, validator2, alchemy2, alerter2).await;
     });
 
-    let gitlab_task = if let Some(gl_cfg) = cfg.gitlab {
-        let (cache3, validator3, alchemy3, alerter3) = (
-            cache.clone(), validator.clone(), alchemy.clone(), alerter.clone(),
-        );
-        let keywords3 = cfg.github.keywords.clone();
-        Some(tokio::spawn(async move {
-            gitlab_scan_loop(gl_cfg.token, gl_cfg.interval_secs, keywords3, cache3, validator3, alchemy3, alerter3).await;
-        }))
-    } else {
-        info!("GitLab scanner disabled (no [gitlab] config)");
-        None
-    };
-
     let token = cfg.github.token.clone();
     let events_task = tokio::spawn(async move {
         events_scan_loop(token, cache, poller, validator, alchemy, alerter).await;
     });
 
-    match gitlab_task {
-        Some(gt) => tokio::select! {
-            _ = keyword_task => error!("Keyword scan task exited unexpectedly"),
-            _ = events_task => error!("Events scan task exited unexpectedly"),
-            _ = gt => error!("GitLab scan task exited unexpectedly"),
-        },
-        None => tokio::select! {
-            _ = keyword_task => error!("Keyword scan task exited unexpectedly"),
-            _ = events_task => error!("Events scan task exited unexpectedly"),
-        },
+    tokio::select! {
+        _ = keyword_task => error!("Keyword scan task exited unexpectedly"),
+        _ = events_task => error!("Events scan task exited unexpectedly"),
     }
 
     Ok(())
@@ -257,63 +236,6 @@ async fn process_finding(
     }
 }
 
-async fn gitlab_scan_loop(
-    token: Option<String>,
-    interval_secs: u64,
-    keywords: Vec<String>,
-    cache: SharedCache,
-    validator: SharedValidator,
-    alchemy: SharedAlchemy,
-    alerter: SharedAlerter,
-) {
-    let poller = gitlab::GitlabPoller::new(token);
-    loop {
-        for keyword in &keywords {
-            info!("[gitlab] Searching: {}", keyword);
-            tokio::time::sleep(Duration::from_secs(3)).await;
-
-            let results = match poller.search(keyword).await {
-                Ok(r) => r,
-                Err(e) => {
-                    warn!("[gitlab] Search error for '{}': {}", keyword, e);
-                    continue;
-                }
-            };
-
-            info!("[gitlab] Found {} results for '{}'", results.len(), keyword);
-
-            for blob in results {
-                let ref_name = blob.ref_field.as_deref().unwrap_or("main");
-                let cache_key = format!("gitlab/{}/{}/{}", blob.project_id, blob.path, ref_name);
-                {
-                    let c = cache.lock().await;
-                    if c.is_seen(&cache_key) { continue; }
-                }
-
-                let content = match poller.fetch_content(blob.project_id, &blob.path, ref_name).await {
-                    Ok(c) => c,
-                    Err(_) => blob.data.clone(),
-                };
-
-                let link = format!(
-                    "https://gitlab.com/api/v4/projects/{}/repository/files/{}/raw?ref={}",
-                    blob.project_id,
-                    urlencoding::encode(&blob.path),
-                    ref_name
-                );
-
-                let result = analyzer::analyze(&content);
-                if result.found {
-                    process_finding(&validator, &alchemy, &alerter, &format!("gitlab:{}", blob.project_id), &blob.path, &result.secrets, &content, &link, "[gitlab]").await;
-                }
-                cache.lock().await.mark_seen(&cache_key).ok();
-            }
-        }
-
-        info!("[gitlab] Cycle complete. Sleeping {}s", interval_secs);
-        tokio::time::sleep(Duration::from_secs(interval_secs)).await;
-    }
-}
 
 async fn send_with_alchemy(
     alchemy: &SharedAlchemy,

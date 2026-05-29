@@ -12,10 +12,6 @@ keywords = [
 ]
 interval_secs = 120
 
-[gitlab]
-token = ""          # optional — https://gitlab.com/-/user_settings/personal_access_tokens (scope: read_api)
-interval_secs = 180
-
 [openrouter]
 api_key = ""
 model = "nvidia/nemotron-3-super-120b-a12b:free"

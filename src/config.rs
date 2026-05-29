@@ -3,15 +3,8 @@ use serde::Deserialize;
 #[derive(Deserialize, Debug)]
 pub struct Config {
     pub github: GithubConfig,
-    pub gitlab: Option<GitlabConfig>,
     pub openrouter: OpenRouterConfig,
     pub telegram: TelegramConfig,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct GitlabConfig {
-    pub token: Option<String>,
-    pub interval_secs: u64,
 }
 
 #[derive(Deserialize, Debug)]
