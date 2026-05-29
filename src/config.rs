@@ -5,7 +5,6 @@ pub struct Config {
     pub github: GithubConfig,
     pub openrouter: OpenRouterConfig,
     pub telegram: TelegramConfig,
-    pub alchemy: AlchemyConfig,
 }
 
 #[derive(Deserialize, Debug)]
@@ -30,10 +29,6 @@ pub struct TelegramConfig {
     pub message_thread_id: Option<i64>,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct AlchemyConfig {
-    pub api_key: String,
-}
 
 pub fn load(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(path)?;
@@ -59,9 +54,6 @@ model = "meta-llama/llama-3.1-8b-instruct:free"
 [telegram]
 bot_token = "123:ABC"
 chat_id = "456"
-
-[alchemy]
-api_key = "test_alchemy_key"
 "#;
         let path = "/tmp/test_config.toml";
         std::fs::write(path, toml).unwrap();
@@ -86,9 +78,6 @@ model = "model"
 [telegram]
 bot_token = "tok"
 chat_id = "id"
-
-[alchemy]
-api_key = "test_key"
 "#;
         let path = "/tmp/test_config_no_token.toml";
         std::fs::write(path, toml).unwrap();

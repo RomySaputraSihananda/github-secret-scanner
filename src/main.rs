@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cfg.openrouter.model.clone(),
         cfg.openrouter.fallback_models.clone(),
     );
-    let alchemy = alchemy::AlchemyValidator::new(cfg.alchemy.api_key.clone());
+    let alchemy = alchemy::OnChainValidator::new();
     let alerter = alerter::Alerter::new(
         cfg.telegram.bot_token.clone(),
         cfg.telegram.chat_id.clone(),
@@ -158,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn send_with_alchemy(
-    alchemy: &alchemy::AlchemyValidator,
+    alchemy: &alchemy::OnChainValidator,
     alerter: &alerter::Alerter,
     repo: &str,
     path: &str,

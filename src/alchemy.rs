@@ -41,16 +41,14 @@ impl std::fmt::Display for Chain {
     }
 }
 
-pub struct AlchemyValidator {
+pub struct OnChainValidator {
     client: Client,
-    api_key: String,
 }
 
-impl AlchemyValidator {
-    pub fn new(api_key: String) -> Self {
+impl OnChainValidator {
+    pub fn new() -> Self {
         Self {
             client: Client::new(),
-            api_key,
         }
     }
 
@@ -80,10 +78,7 @@ impl AlchemyValidator {
         &self,
         pubkey: &str,
     ) -> Result<OnChainResult, Box<dyn std::error::Error + Send + Sync>> {
-        // Coba Alchemy dulu, fallback ke public RPC kalau 429/error
-        let alchemy_url = format!("https://solana-mainnet.g.alchemy.com/v2/{}", self.api_key);
         let endpoints = [
-            (alchemy_url.as_str(), "mainnet"),
             ("https://api.mainnet-beta.solana.com", "mainnet"),
             ("https://rpc.ankr.com/solana", "mainnet"),
             ("https://api.devnet.solana.com", "devnet"),
@@ -138,10 +133,7 @@ impl AlchemyValidator {
         &self,
         address: &str,
     ) -> Result<OnChainResult, Box<dyn std::error::Error + Send + Sync>> {
-        // Coba beberapa public ETH RPC
-        let alchemy_url = format!("https://eth-mainnet.g.alchemy.com/v2/{}", self.api_key);
         let urls = [
-            alchemy_url.as_str(),
             "https://eth.llamarpc.com",
             "https://rpc.ankr.com/eth",
             "https://cloudflare-eth.com",
