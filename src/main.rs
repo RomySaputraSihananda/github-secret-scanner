@@ -1,3 +1,4 @@
+mod alchemy;
 mod alerter;
 mod analyzer;
 mod cache;
@@ -19,6 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cfg.openrouter.api_key.clone(),
         cfg.openrouter.model.clone(),
     );
+    let alchemy = alchemy::AlchemyValidator::new(cfg.alchemy.api_key.clone());
     let alerter = alerter::Alerter::new(
         cfg.telegram.bot_token.clone(),
         cfg.telegram.chat_id.clone(),
@@ -73,18 +75,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if result.found {
                             match validator.validate(&content, &result.secrets).await {
                                 Ok(v) if v.is_real => {
-                                    info!("Confirmed secret in file {}/{}: {}", item.repository.full_name, item.path, v.reason);
-                                    if let Err(e) = alerter
-                                        .send(
-                                            &item.repository.full_name,
-                                            &item.path,
-                                            &result.secrets,
-                                            &content,
-                                            &item.html_url,
-                                        )
-                                        .await
-                                    {
-                                        error!("Telegram alert failed: {}", e);
+                                    info!("OpenRouter confirmed {}/{}: {}", item.repository.full_name, item.path, v.reason);
+                                    match alchemy.validate(&content).await {
+                                        Some(chain) if chain.is_active => {
+                                            info!("Alchemy confirmed wallet {} ({:.4} SOL)", chain.address, chain.balance_sol);
+                                            let mut enriched = result.secrets.clone();
+                                            enriched.push(format!("Wallet: `{}` — {:.4} SOL", chain.address, chain.balance_sol));
+                                            if let Err(e) = alerter.send(&item.repository.full_name, &item.path, &enriched, &content, &item.html_url).await {
+                                                error!("Telegram alert failed: {}", e);
+                                            }
+                                        }
+                                        Some(chain) => {
+                                            info!("Wallet {} has no balance/history — skip", chain.address);
+                                        }
+                                        None => {
+                                            info!("Could not extract wallet address from {}/{} — skip", item.repository.full_name, item.path);
+                                        }
                                     }
                                 }
                                 Ok(v) => {

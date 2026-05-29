@@ -20,3 +20,6 @@ model = "meta-llama/llama-3.1-8b-instruct:free"
 bot_token = ""
 chat_id = ""
 message_thread_id =     # optional — untuk kirim ke thread/topic tertentu di group
+
+[alchemy]
+api_key = ""            # dari https://dashboard.alchemy.com — buat app Solana Mainnet
