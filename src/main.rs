@@ -55,25 +55,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         error!("Failed to send startup notification: {}", e);
     }
 
-    // Clone Arc untuk dua task paralel
     let (cache2, poller2, validator2, alchemy2, alerter2) = (
         cache.clone(), poller.clone(), validator.clone(), alchemy.clone(), alerter.clone(),
     );
     let keywords = cfg.github.keywords.clone();
     let interval_secs = cfg.github.interval_secs;
 
-    // Task 1: keyword search loop
     let keyword_task = tokio::spawn(async move {
         keyword_scan_loop(keywords, interval_secs, cache2, poller2, validator2, alchemy2, alerter2).await;
     });
 
-    // Task 2: events stream loop
     let token = cfg.github.token.clone();
     let events_task = tokio::spawn(async move {
         events_scan_loop(token, cache, poller, validator, alchemy, alerter).await;
     });
 
-    // Jalan bareng sampai salah satu selesai (tidak akan selesai — infinite loop)
     tokio::select! {
         _ = keyword_task => error!("Keyword scan task exited unexpectedly"),
         _ = events_task => error!("Events scan task exited unexpectedly"),
@@ -132,7 +128,6 @@ async fn keyword_scan_loop(
                     cache.lock().await.mark_seen(&file_key).ok();
                 }
 
-                // Scan recent commits dari repo ini
                 let repo = &item.repository.full_name;
                 let commits = match poller.fetch_recent_commits(repo).await {
                     Ok(c) => c,

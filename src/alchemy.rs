@@ -54,7 +54,6 @@ impl OnChainValidator {
     pub async fn validate(&self, content: &str) -> Vec<OnChainResult> {
         let mut results = Vec::new();
 
-        // Solana check
         if let Some(pubkey) = extract_solana_pubkey(content) {
             match self.check_solana(&pubkey).await {
                 Ok(r) => results.push(r),
@@ -62,7 +61,6 @@ impl OnChainValidator {
             }
         }
 
-        // Ethereum check
         if let Some(address) = extract_eth_address(content) {
             match self.check_ethereum(&address).await {
                 Ok(r) => results.push(r),
@@ -87,7 +85,6 @@ impl OnChainValidator {
             match self.check_sol_rpc(pubkey, url, network).await {
                 Ok(r) if r.is_active => return Ok(r),
                 Ok(r) => {
-                    // mainnet kosong — cek devnet juga
                     if network == "devnet" { return Ok(r); }
                     continue;
                 }
@@ -97,7 +94,6 @@ impl OnChainValidator {
                 }
             }
         }
-        // Semua endpoint dicoba, return hasil terakhir
         self.check_sol_rpc(pubkey, "https://api.mainnet-beta.solana.com", "mainnet").await
     }
 
@@ -158,7 +154,6 @@ impl OnChainValidator {
             .json(&json!({"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":[address,"latest"]}))
             .send().await?.json().await?;
 
-        // Balance in hex wei
         let wei_hex = bal["result"].as_str().unwrap_or("0x0");
         let wei = u128::from_str_radix(wei_hex.trim_start_matches("0x"), 16).unwrap_or(0);
         let eth = wei as f64 / 1e18;
@@ -206,13 +201,11 @@ fn extract_eth_address(content: &str) -> Option<String> {
 
     let signing_key = SigningKey::from_bytes(privkey_bytes.as_slice().into()).ok()?;
     let verifying_key = signing_key.verifying_key();
-    // Uncompressed pubkey: 65 bytes (04 + X + Y), skip first byte
     let pubkey_bytes = verifying_key.to_encoded_point(false);
     let pubkey_uncompressed = pubkey_bytes.as_bytes();
     if pubkey_uncompressed.len() != 65 {
         return None;
     }
-    // Keccak256 of X||Y (skip 04 prefix), take last 20 bytes
     let hash = Keccak256::digest(&pubkey_uncompressed[1..]);
     let address = format!("0x{}", hex::encode(&hash[12..]));
     Some(address)
@@ -236,11 +229,9 @@ mod tests {
 
     #[test]
     fn test_extract_eth_address_from_hex_key() {
-        // Known test vector: privkey -> address
         let content = "PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
         let address = extract_eth_address(content);
         assert!(address.is_some());
-        // This is the well-known Hardhat/Anvil test account #0
         assert_eq!(
             address.unwrap().to_lowercase(),
             "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"

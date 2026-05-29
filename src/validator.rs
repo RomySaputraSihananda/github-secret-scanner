@@ -80,7 +80,6 @@ False positives include: test data, example values, documentation, hex colors, r
 Respond ONLY in JSON: {{"is_real": true/false, "reason": "one sentence explanation"}}"#
         );
 
-        // Rotasi model — skip ke berikutnya kalau 429
         for (i, model) in self.models.iter().enumerate() {
             let request = OpenRouterRequest {
                 model: model.clone(),
@@ -134,7 +133,6 @@ fn extract_json(text: &str) -> &str {
     text
 }
 
-// Fallback: if JSON is malformed, look for is_real true/false in raw text
 fn parse_fallback(text: &str) -> ValidationResult {
     let lower = text.to_lowercase();
     let is_real = lower.contains("\"is_real\": true")

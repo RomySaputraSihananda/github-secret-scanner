@@ -56,7 +56,6 @@ impl EventPoller {
 
         let resp = req.send().await?;
 
-        // Ambil poll interval dari header GitHub
         if let Some(interval) = resp.headers().get("X-Poll-Interval") {
             if let Ok(s) = interval.to_str() {
                 if let Ok(n) = s.parse::<u64>() {
@@ -65,12 +64,10 @@ impl EventPoller {
             }
         }
 
-        // Simpan ETag untuk request berikutnya
         if let Some(etag) = resp.headers().get("ETag") {
             self.etag = Some(etag.to_str().unwrap_or("").to_string());
         }
 
-        // 304 Not Modified — tidak ada event baru
         if resp.status().as_u16() == 304 {
             debug!("Events: no new events (304)");
             return Ok(vec![]);

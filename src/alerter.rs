@@ -60,7 +60,6 @@ impl Alerter {
         Ok(())
     }
 
-    /// Kirim alert, return message_id untuk bisa di-edit nanti
     pub async fn send(
         &self,
         repo: &str,
@@ -91,7 +90,6 @@ impl Alerter {
         Ok(resp.result.map(|r| r.message_id).unwrap_or(0))
     }
 
-    /// Edit message yang sudah dikirim dengan hasil on-chain
     pub async fn edit_onchain(
         &self,
         message_id: i64,
