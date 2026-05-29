@@ -4,6 +4,7 @@ mod analyzer;
 mod cache;
 mod config;
 mod events;
+mod npm;
 mod pastebin;
 mod poller;
 mod validator;
@@ -75,10 +76,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         async move { pastebin_scan_loop(c, v, a, al).await; }
     });
 
+    let npm_task = tokio::spawn({
+        let (c, v, a, al) = (cache.clone(), validator.clone(), alchemy.clone(), alerter.clone());
+        let kw = cfg.github.keywords.clone();
+        async move { npm_scan_loop(kw, c, v, a, al).await; }
+    });
+
     tokio::select! {
         _ = keyword_task => error!("Keyword scan task exited unexpectedly"),
         _ = events_task => error!("Events scan task exited unexpectedly"),
         _ = pastebin_task => error!("Pastebin scan task exited unexpectedly"),
+        _ = npm_task => error!("npm scan task exited unexpectedly"),
     }
 
     Ok(())
@@ -242,6 +250,44 @@ async fn process_finding(
     }
 }
 
+
+async fn npm_scan_loop(
+    keywords: Vec<String>,
+    cache: SharedCache,
+    validator: SharedValidator,
+    alchemy: SharedAlchemy,
+    alerter: SharedAlerter,
+) {
+    let scanner = npm::NpmScanner::new();
+    loop {
+        for keyword in &keywords {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+
+            let files = match scanner.scan_recent(keyword).await {
+                Ok(f) => f,
+                Err(e) => { warn!("[npm] Error for '{}': {}", keyword, e); continue; }
+            };
+
+            if !files.is_empty() {
+                info!("[npm] Found {} sensitive files for '{}'", files.len(), keyword);
+            }
+
+            for file in files {
+                let cache_key = format!("npm/{}/{}", file.package, file.filename);
+                { if cache.lock().await.is_seen(&cache_key) { continue; } }
+
+                let result = analyzer::analyze(&file.content);
+                if result.found {
+                    process_finding(&validator, &alchemy, &alerter, &format!("npm:{}", file.package), &file.filename, &result.secrets, &file.content, &file.url, "[npm]").await;
+                }
+                cache.lock().await.mark_seen(&cache_key).ok();
+            }
+        }
+
+        info!("[npm] Cycle complete. Sleeping 300s");
+        tokio::time::sleep(Duration::from_secs(300)).await;
+    }
+}
 
 async fn pastebin_scan_loop(
     cache: SharedCache,
