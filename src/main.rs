@@ -21,6 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let validator = validator::Validator::new(
         cfg.openrouter.api_key.clone(),
         cfg.openrouter.model.clone(),
+        cfg.openrouter.fallback_models.clone(),
     );
     let alchemy = alchemy::AlchemyValidator::new(cfg.alchemy.api_key.clone());
     let alerter = alerter::Alerter::new(

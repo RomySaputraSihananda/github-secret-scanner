@@ -37,15 +37,17 @@ pub struct ValidationResult {
 pub struct Validator {
     client: Client,
     api_key: String,
-    model: String,
+    models: Vec<String>,
 }
 
 impl Validator {
-    pub fn new(api_key: String, model: String) -> Self {
+    pub fn new(api_key: String, model: String, fallback_models: Vec<String>) -> Self {
+        let mut models = vec![model];
+        models.extend(fallback_models);
         Self {
             client: Client::new(),
             api_key,
-            model,
+            models,
         }
     }
 
@@ -78,41 +80,50 @@ False positives include: test data, example values, documentation, hex colors, r
 Respond ONLY in JSON: {{"is_real": true/false, "reason": "one sentence explanation"}}"#
         );
 
-        let request = OpenRouterRequest {
-            model: self.model.clone(),
-            messages: vec![Message {
-                role: "user".to_string(),
-                content: prompt,
-            }],
-        };
+        // Rotasi model — skip ke berikutnya kalau 429
+        for (i, model) in self.models.iter().enumerate() {
+            let request = OpenRouterRequest {
+                model: model.clone(),
+                messages: vec![Message {
+                    role: "user".to_string(),
+                    content: prompt.clone(),
+                }],
+            };
 
-        let resp = self
-            .client
-            .post("https://openrouter.ai/api/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
-            .await?;
+            let resp = self
+                .client
+                .post("https://openrouter.ai/api/v1/chat/completions")
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Content-Type", "application/json")
+                .json(&request)
+                .send()
+                .await?;
 
-        let status = resp.status();
-        let body = resp.text().await?;
+            let status = resp.status();
+            let body = resp.text().await?;
 
-        if !status.is_success() {
-            return Err(format!("OpenRouter error {}: {}", status, body).into());
+            if status.as_u16() == 429 {
+                tracing::warn!("Model {} rate limited, trying next ({}/{})", model, i + 1, self.models.len());
+                continue;
+            }
+
+            if !status.is_success() {
+                return Err(format!("OpenRouter error {} (model={}): {}", status, model, body).into());
+            }
+
+            let or_resp: OpenRouterResponse = serde_json::from_str(&body)
+                .map_err(|e| format!("Parse error: {e}\nBody: {body}"))?;
+
+            let raw = &or_resp.choices[0].message.content;
+            let json_str = extract_json(raw);
+            let result = serde_json::from_str::<ValidationResult>(json_str)
+                .unwrap_or_else(|_| parse_fallback(raw));
+
+            tracing::debug!("Validated with model: {}", model);
+            return Ok(result);
         }
 
-        let or_resp: OpenRouterResponse = serde_json::from_str(&body)
-            .map_err(|e| format!("Parse error: {e}\nBody: {body}"))?;
-
-        let raw = &or_resp.choices[0].message.content;
-        let json_str = extract_json(raw);
-
-        // Try strict parse first, fall back to extracting is_real from raw text
-        let result = serde_json::from_str::<ValidationResult>(json_str)
-            .unwrap_or_else(|_| parse_fallback(raw));
-
-        Ok(result)
+        Err("All models rate limited or failed".into())
     }
 }
 

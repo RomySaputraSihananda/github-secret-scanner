@@ -19,6 +19,8 @@ pub struct GithubConfig {
 pub struct OpenRouterConfig {
     pub api_key: String,
     pub model: String,
+    #[serde(default)]
+    pub fallback_models: Vec<String>,
 }
 
 #[derive(Deserialize, Debug)]

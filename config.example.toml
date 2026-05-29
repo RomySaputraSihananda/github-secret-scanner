@@ -14,7 +14,14 @@ interval_secs = 120
 
 [openrouter]
 api_key = ""
-model = "meta-llama/llama-3.1-8b-instruct:free"
+model = "nvidia/nemotron-3-super-120b-a12b:free"
+fallback_models = [
+  "meta-llama/llama-3.1-8b-instruct:free",
+  "mistralai/mistral-7b-instruct:free",
+  "microsoft/phi-3-mini-128k-instruct:free",
+  "qwen/qwen-2-7b-instruct:free",
+  "google/gemma-3-4b-it:free",
+]
 
 [telegram]
 bot_token = ""
