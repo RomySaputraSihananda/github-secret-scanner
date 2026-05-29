@@ -14,8 +14,6 @@ pub struct CommitSummary {
 
 #[derive(Deserialize, Debug)]
 pub struct CommitDetail {
-    pub sha: String,
-    pub html_url: String,
     pub files: Option<Vec<CommitFile>>,
 }
 
@@ -27,7 +25,6 @@ pub struct CommitFile {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct SearchItem {
-    pub name: String,
     pub path: String,
     pub sha: String,
     pub html_url: String,
