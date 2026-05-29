@@ -46,53 +46,52 @@ impl AlchemyValidator {
         &self,
         pubkey: &str,
     ) -> Result<OnChainResult, Box<dyn std::error::Error + Send + Sync>> {
-        let url = format!(
-            "https://solana-mainnet.g.alchemy.com/v2/{}",
-            self.api_key
-        );
+        // Cek mainnet dulu, fallback ke devnet kalau kosong
+        let mainnet = self.check_rpc(pubkey, &format!("https://solana-mainnet.g.alchemy.com/v2/{}", self.api_key)).await;
+        if let Ok(r) = &mainnet {
+            if r.is_active {
+                return mainnet;
+            }
+        }
+        // Fallback public devnet
+        self.check_rpc(pubkey, "https://api.devnet.solana.com").await
+    }
 
-        // check balance
+    async fn check_rpc(
+        &self,
+        pubkey: &str,
+        rpc_url: &str,
+    ) -> Result<OnChainResult, Box<dyn std::error::Error + Send + Sync>> {
         let balance_resp: serde_json::Value = self
             .client
-            .post(&url)
+            .post(rpc_url)
             .json(&json!({
-                "jsonrpc": "2.0",
-                "id": 1,
+                "jsonrpc": "2.0", "id": 1,
                 "method": "getBalance",
                 "params": [pubkey]
             }))
-            .send()
-            .await?
-            .json()
-            .await?;
+            .send().await?.json().await?;
 
         let lamports = balance_resp["result"]["value"].as_u64().unwrap_or(0);
         let balance_sol = lamports as f64 / 1_000_000_000.0;
 
-        // check tx history
         let sig_resp: serde_json::Value = self
             .client
-            .post(&url)
+            .post(rpc_url)
             .json(&json!({
-                "jsonrpc": "2.0",
-                "id": 1,
+                "jsonrpc": "2.0", "id": 1,
                 "method": "getSignaturesForAddress",
                 "params": [pubkey, {"limit": 1}]
             }))
-            .send()
-            .await?
-            .json()
-            .await?;
+            .send().await?.json().await?;
 
-        let has_tx = sig_resp["result"]
-            .as_array()
-            .map(|a| !a.is_empty())
-            .unwrap_or(false);
+        let has_tx = sig_resp["result"].as_array().map(|a| !a.is_empty()).unwrap_or(false);
+        let network = if rpc_url.contains("devnet") { "devnet" } else { "mainnet" };
 
         Ok(OnChainResult {
             is_active: balance_sol > 0.0 || has_tx,
             balance_sol,
-            address: pubkey.to_string(),
+            address: format!("{} ({})", pubkey, network),
         })
     }
 }
