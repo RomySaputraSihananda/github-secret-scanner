@@ -6,6 +6,25 @@ pub struct SearchResponse {
     pub items: Vec<SearchItem>,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct CommitSummary {
+    pub sha: String,
+    pub html_url: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct CommitDetail {
+    pub sha: String,
+    pub html_url: String,
+    pub files: Option<Vec<CommitFile>>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct CommitFile {
+    pub filename: String,
+    pub patch: Option<String>,
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct SearchItem {
     pub name: String,
@@ -71,6 +90,44 @@ impl Poller {
         }
 
         req.send().await?.text().await
+    }
+
+    pub async fn fetch_recent_commits(
+        &self,
+        repo: &str,
+    ) -> Result<Vec<CommitSummary>, reqwest::Error> {
+        let url = format!("https://api.github.com/repos/{}/commits", repo);
+        let mut req = self
+            .client
+            .get(&url)
+            .query(&[("per_page", "5")])
+            .header("Accept", "application/vnd.github.v3+json")
+            .header("User-Agent", "github-secret-scanner/1.0");
+
+        if let Some(token) = &self.token {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+
+        req.send().await?.json().await
+    }
+
+    pub async fn fetch_commit_detail(
+        &self,
+        repo: &str,
+        sha: &str,
+    ) -> Result<CommitDetail, reqwest::Error> {
+        let url = format!("https://api.github.com/repos/{}/commits/{}", repo, sha);
+        let mut req = self
+            .client
+            .get(&url)
+            .header("Accept", "application/vnd.github.v3+json")
+            .header("User-Agent", "github-secret-scanner/1.0");
+
+        if let Some(token) = &self.token {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+
+        req.send().await?.json().await
     }
 }
 

@@ -14,10 +14,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = config::load("config.toml")?;
     let cache = cache::Cache::new("scanner.db")?;
     let poller = poller::Poller::new(cfg.github.token.clone());
-    let analyzer = analyzer::Analyzer::new(
-        cfg.openrouter.api_key.clone(),
-        cfg.openrouter.model.clone(),
-    );
     let alerter = alerter::Alerter::new(
         cfg.telegram.bot_token.clone(),
         cfg.telegram.chat_id.clone(),
@@ -29,6 +25,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cfg.github.keywords.len(),
         cfg.github.interval_secs
     );
+
+    let startup_msg = format!(
+        "✅ *Scanner aktif*\n\nKeywords: {}\nInterval: {}s\nMode: regex",
+        cfg.github.keywords.len(),
+        cfg.github.interval_secs,
+    );
+    if let Err(e) = alerter.notify(&startup_msg).await {
+        error!("Failed to send startup notification: {}", e);
+    }
 
     loop {
         for keyword in &cfg.github.keywords {
@@ -45,63 +50,101 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("Found {} results for '{}'", items.len(), keyword);
 
             for item in items {
-                let cache_key = format!(
-                    "{}/{}/{}",
+                // --- scan file content ---
+                let file_key = format!(
+                    "file/{}/{}/{}",
                     item.repository.full_name, item.path, item.sha
                 );
-
-                if cache.is_seen(&cache_key) {
-                    continue;
+                if !cache.is_seen(&file_key) {
+                    let content = match poller.fetch_content(&item).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            warn!("Fetch error for {}: {}", item.html_url, e);
+                            String::new()
+                        }
+                    };
+                    if !content.is_empty() {
+                        let result = analyzer::analyze(&content);
+                        if result.found {
+                            info!("Secret in file {}/{}", item.repository.full_name, item.path);
+                            if let Err(e) = alerter
+                                .send(
+                                    &item.repository.full_name,
+                                    &item.path,
+                                    &result.secrets,
+                                    &content,
+                                    &item.html_url,
+                                )
+                                .await
+                            {
+                                error!("Telegram alert failed: {}", e);
+                            }
+                        }
+                        cache.mark_seen(&file_key)?;
+                    }
                 }
 
-                let content = match poller.fetch_content(&item).await {
+                // --- scan recent commits of this repo ---
+                let repo = &item.repository.full_name;
+                let commits = match poller.fetch_recent_commits(repo).await {
                     Ok(c) => c,
                     Err(e) => {
-                        warn!("Fetch error for {}: {}", item.html_url, e);
+                        warn!("Commits fetch error for {}: {}", repo, e);
                         continue;
                     }
                 };
 
-                match analyzer.analyze(&content).await {
-                    Err(e) => {
-                        error!(
-                            "Analyzer error for {}/{}: {}",
-                            item.repository.full_name, item.path, e
-                        );
-                        // Do NOT mark as seen — retry next cycle
+                for commit in commits {
+                    let commit_key = format!("commit/{}/{}", repo, commit.sha);
+                    if cache.is_seen(&commit_key) {
                         continue;
                     }
-                    Ok(result) if result.found => {
-                        info!(
-                            "Secret found in {}/{}",
-                            item.repository.full_name, item.path
-                        );
-                        if let Err(e) = alerter
-                            .send(
-                                &item.repository.full_name,
-                                &item.path,
-                                &result.secrets,
-                                &content,
-                                &item.html_url,
-                            )
-                            .await
-                        {
-                            error!("Telegram alert failed: {}", e);
+
+                    let detail = match poller.fetch_commit_detail(repo, &commit.sha).await {
+                        Ok(d) => d,
+                        Err(e) => {
+                            warn!("Commit detail error {}: {}", commit.sha, e);
+                            continue;
                         }
-                        cache.mark_seen(&cache_key)?;
+                    };
+
+                    let files = detail.files.unwrap_or_default();
+                    for file in &files {
+                        let patch = match &file.patch {
+                            Some(p) => p,
+                            None => continue,
+                        };
+                        // hanya scan baris yang ditambahkan
+                        let added: String = patch
+                            .lines()
+                            .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+                            .map(|l| &l[1..])
+                            .collect::<Vec<_>>()
+                            .join("\n");
+
+                        let result = analyzer::analyze(&added);
+                        if result.found {
+                            info!("Secret in commit {}/{} ({})", repo, file.filename, &commit.sha[..8]);
+                            if let Err(e) = alerter
+                                .send(
+                                    repo,
+                                    &file.filename,
+                                    &result.secrets,
+                                    &added,
+                                    &commit.html_url,
+                                )
+                                .await
+                            {
+                                error!("Telegram alert failed: {}", e);
+                            }
+                        }
                     }
-                    Ok(_) => {
-                        info!("Clean: {}/{}", item.repository.full_name, item.path);
-                        cache.mark_seen(&cache_key)?;
-                    }
+                    cache.mark_seen(&commit_key)?;
                 }
             }
         }
 
-        info!(
-            "Cycle complete. Sleeping {}s",
-            cfg.github.interval_secs
-        );
+        info!("Cycle complete. Sleeping {}s", cfg.github.interval_secs);
         tokio::time::sleep(Duration::from_secs(cfg.github.interval_secs)).await;
     }
 }

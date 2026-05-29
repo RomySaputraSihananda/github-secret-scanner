@@ -1,103 +1,70 @@
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use once_cell::sync::Lazy;
+use regex::Regex;
 
-#[derive(Serialize)]
-struct OpenRouterRequest {
-    model: String,
-    messages: Vec<Message>,
-}
-
-#[derive(Serialize)]
-struct Message {
-    role: String,
-    content: String,
-}
-
-#[derive(Deserialize)]
-struct OpenRouterResponse {
-    choices: Vec<Choice>,
-}
-
-#[derive(Deserialize)]
-struct Choice {
-    message: MessageContent,
-}
-
-#[derive(Deserialize)]
-struct MessageContent {
-    content: String,
-}
-
-#[derive(Deserialize, Debug)]
+#[derive(Debug)]
 pub struct AnalysisResult {
     pub found: bool,
     pub secrets: Vec<String>,
 }
 
-pub struct Analyzer {
-    client: Client,
-    api_key: String,
-    model: String,
+struct Pattern {
+    label: &'static str,
+    re: Regex,
 }
 
-impl Analyzer {
-    pub fn new(api_key: String, model: String) -> Self {
-        Self {
-            client: Client::new(),
-            api_key,
-            model,
+static PATTERNS: Lazy<Vec<Pattern>> = Lazy::new(|| {
+    vec![
+        Pattern {
+            label: "Solana keypair byte array",
+            re: Regex::new(r"\[\s*(?:\d{1,3}\s*,\s*){31,63}\d{1,3}\s*\]").unwrap(),
+        },
+        Pattern {
+            label: "Private key assignment",
+            re: Regex::new(
+                r#"(?i)(?:private_?key|secret_?key|wallet_?private_?key)\s*[=:]\s*['"]?([A-Za-z0-9+/=_-]{32,})['"]?"#,
+            )
+            .unwrap(),
+        },
+        Pattern {
+            label: "Ethereum private key (hex 64)",
+            re: Regex::new(r"(?:0x)?[0-9a-fA-F]{64}").unwrap(),
+        },
+        Pattern {
+            label: "AWS Access Key",
+            re: Regex::new(r"AKIA[0-9A-Z]{16}").unwrap(),
+        },
+        Pattern {
+            label: "GitHub token",
+            re: Regex::new(r"gh[pousr]_[A-Za-z0-9_]{36,255}").unwrap(),
+        },
+        Pattern {
+            label: "Generic API key in .env",
+            re: Regex::new(
+                r#"(?i)(?:api_?key|access_?token|auth_?token)\s*=\s*['"]?[A-Za-z0-9+/._-]{20,}['"]?"#,
+            )
+            .unwrap(),
+        },
+        Pattern {
+            label: "Mnemonic seed phrase (12–24 words)",
+            re: Regex::new(r"(?:[a-z]{3,12}\s+){11,23}[a-z]{3,12}").unwrap(),
+        },
+    ]
+});
+
+pub fn analyze(content: &str) -> AnalysisResult {
+    let mut secrets = Vec::new();
+
+    for pattern in PATTERNS.iter() {
+        if let Some(m) = pattern.re.find(content) {
+            let snippet = &m.as_str()[..m.as_str().len().min(60)];
+            secrets.push(format!("{}: `{}`...", pattern.label, snippet));
         }
     }
 
-    pub async fn analyze(&self, content: &str) -> Result<AnalysisResult, Box<dyn std::error::Error + Send + Sync>> {
-        let truncated = &content[..content.len().min(2000)];
-
-        let prompt = format!(
-            r#"Analyze this code snippet. Does it contain any secrets such as:
-- Private keys (Solana, Ethereum, or other crypto)
-- Seed phrases or mnemonics
-- API keys (AWS, GitHub tokens, etc.)
-- .env variable assignments with sensitive values
-
-Code:
-```
-{}
-```
-
-Respond ONLY in JSON format with no extra text: {{"found": true, "secrets": ["description"]}} or {{"found": false, "secrets": []}}"#,
-            truncated
-        );
-
-        let request = OpenRouterRequest {
-            model: self.model.clone(),
-            messages: vec![Message {
-                role: "user".to_string(),
-                content: prompt,
-            }],
-        };
-
-        let resp = self
-            .client
-            .post("https://openrouter.ai/api/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
-            .await?;
-
-        let or_resp: OpenRouterResponse = resp.json().await?;
-        let raw = &or_resp.choices[0].message.content;
-        let json_str = extract_json(raw);
-        let result: AnalysisResult = serde_json::from_str(json_str)?;
-        Ok(result)
+    AnalysisResult {
+        found: !secrets.is_empty(),
+        secrets,
     }
-}
-
-fn extract_json(text: &str) -> &str {
-    if let (Some(start), Some(end)) = (text.find('{'), text.rfind('}')) {
-        return &text[start..=end];
-    }
-    text
 }
 
 #[cfg(test)]
@@ -105,25 +72,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_json_clean() {
-        let text = r#"{"found": true, "secrets": ["API key"]}"#;
-        assert_eq!(extract_json(text), text);
-    }
-
-    #[test]
-    fn test_extract_json_with_markdown_wrapper() {
-        let text = "```json\n{\"found\": false, \"secrets\": []}\n```";
-        let extracted = extract_json(text);
-        let result: AnalysisResult = serde_json::from_str(extracted).unwrap();
-        assert!(!result.found);
-    }
-
-    #[test]
-    fn test_extract_json_with_preamble() {
-        let text = r#"Sure! Here is the result: {"found": true, "secrets": ["private key found"]}"#;
-        let extracted = extract_json(text);
-        let result: AnalysisResult = serde_json::from_str(extracted).unwrap();
+    fn test_detects_solana_byte_array() {
+        let content = "let key = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32];";
+        let result = analyze(content);
         assert!(result.found);
-        assert_eq!(result.secrets[0], "private key found");
+        assert!(result.secrets[0].contains("Solana keypair"));
+    }
+
+    #[test]
+    fn test_detects_private_key_assignment() {
+        let content = "PRIVATE_KEY=5KJvsngHeMpm884wtkJNzQGaCErckhHJBGFsvd3VyK5qMZXj3hS";
+        let result = analyze(content);
+        assert!(result.found);
+    }
+
+    #[test]
+    fn test_detects_aws_key() {
+        let content = "aws_access_key_id = AKIAIOSFODNN7EXAMPLE";
+        let result = analyze(content);
+        assert!(result.found);
+        assert!(result.secrets.iter().any(|s| s.contains("AWS")));
+    }
+
+    #[test]
+    fn test_clean_content() {
+        let content = "fn main() { println!(\"Hello, world!\"); }";
+        let result = analyze(content);
+        assert!(!result.found);
     }
 }
