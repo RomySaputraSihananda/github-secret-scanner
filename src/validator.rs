@@ -57,7 +57,7 @@ impl Validator {
         candidates: &[String],
     ) -> Result<ValidationResult, Box<dyn std::error::Error + Send + Sync>> {
         let candidates_list = candidates.join("\n- ");
-        let truncated = &snippet[..snippet.len().min(1500)];
+        let truncated: String = snippet.chars().take(1500).collect();
 
         let prompt = format!(
             r#"You are a crypto security analyst. Regex detected potential secrets in this code snippet.
