@@ -53,11 +53,17 @@ impl Poller {
     }
 
     pub async fn search(&self, keyword: &str) -> Result<Vec<SearchItem>, reqwest::Error> {
+        // Hanya repo yang di-push dalam 7 hari terakhir
+        let since = (chrono::Utc::now() - chrono::Duration::days(7))
+            .format("%Y-%m-%d")
+            .to_string();
+        let query = format!("{} pushed:>{}", keyword, since);
+
         let mut req = self
             .client
             .get("https://api.github.com/search/code")
             .query(&[
-                ("q", keyword),
+                ("q", query.as_str()),
                 ("sort", "indexed"),
                 ("order", "desc"),
                 ("per_page", "10"),
