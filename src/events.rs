@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 #[derive(Deserialize)]
 struct Event {

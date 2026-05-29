@@ -1,5 +1,4 @@
 use k256::ecdsa::SigningKey;
-use k256::elliptic_curve::sec1::ToEncodedPoint;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
