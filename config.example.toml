@@ -21,6 +21,8 @@ fallback_models = [
   "microsoft/phi-3-mini-128k-instruct:free",
   "qwen/qwen-2-7b-instruct:free",
   "google/gemma-3-4b-it:free",
+  "minimax/minimax-m2.5",
+  "minimax/minimax-m2.7",
 ]
 
 [telegram]
