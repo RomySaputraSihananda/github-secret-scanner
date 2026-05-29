@@ -166,15 +166,26 @@ async fn send_with_alchemy(
     content: &str,
     link: &str,
 ) {
-    // Alchemy enrichment — selalu alert, tambah info wallet kalau ada
-    let mut enriched = secrets.to_vec();
+    // Kirim alert segera dengan status "sedang divalidasi"
+    let msg_id = match alerter.send(repo, path, secrets, content, link).await {
+        Ok(id) => id,
+        Err(e) => { error!("Telegram alert failed: {}", e); return; }
+    };
+
+    // Validasi on-chain async, lalu edit message dengan hasilnya
     let chain_results = alchemy.validate(content).await;
-    for r in &chain_results {
-        let status = if r.is_active { "aktif" } else { "inactive" };
-        info!("Alchemy {}: {} — {:.6} {} ({})", r.chain, r.address, r.balance, r.chain, status);
-        enriched.push(format!("🔑 {} Wallet: `{}` — {:.6} {} ({})", r.chain, r.address, r.balance, r.chain, status));
-    }
-    if let Err(e) = alerter.send(repo, path, &enriched, content, link).await {
-        error!("Telegram alert failed: {}", e);
+    let onchain_status = if chain_results.is_empty() {
+        "🔍 On-chain: _tidak ada wallet terdeteksi_".to_string()
+    } else {
+        let lines: Vec<String> = chain_results.iter().map(|r| {
+            let status = if r.is_active { "✅ aktif" } else { "⚪ inactive" };
+            info!("Alchemy {}: {} — {:.6} {} ({})", r.chain, r.address, r.balance, r.chain, status);
+            format!("🔑 {} `{}` — {:.6} {} ({})", r.chain, r.address, r.balance, r.chain, status)
+        }).collect();
+        format!("🔍 On-chain:\n{}", lines.join("\n"))
+    };
+
+    if let Err(e) = alerter.edit_onchain(msg_id, repo, path, secrets, content, link, &onchain_status).await {
+        error!("Telegram edit failed: {}", e);
     }
 }
