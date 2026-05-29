@@ -80,16 +80,31 @@ impl AlchemyValidator {
         &self,
         pubkey: &str,
     ) -> Result<OnChainResult, Box<dyn std::error::Error + Send + Sync>> {
-        // Mainnet dulu, fallback devnet
-        let mainnet = self
-            .check_sol_rpc(pubkey, &format!("https://solana-mainnet.g.alchemy.com/v2/{}", self.api_key), "mainnet")
-            .await;
-        if let Ok(r) = &mainnet {
-            if r.is_active {
-                return mainnet;
+        // Coba Alchemy dulu, fallback ke public RPC kalau 429/error
+        let alchemy_url = format!("https://solana-mainnet.g.alchemy.com/v2/{}", self.api_key);
+        let endpoints = [
+            (alchemy_url.as_str(), "mainnet"),
+            ("https://api.mainnet-beta.solana.com", "mainnet"),
+            ("https://rpc.ankr.com/solana", "mainnet"),
+            ("https://api.devnet.solana.com", "devnet"),
+        ];
+
+        for (url, network) in endpoints {
+            match self.check_sol_rpc(pubkey, url, network).await {
+                Ok(r) if r.is_active => return Ok(r),
+                Ok(r) => {
+                    // mainnet kosong — cek devnet juga
+                    if network == "devnet" { return Ok(r); }
+                    continue;
+                }
+                Err(e) => {
+                    tracing::debug!("SOL RPC {} failed: {}", url, e);
+                    continue;
+                }
             }
         }
-        self.check_sol_rpc(pubkey, "https://api.devnet.solana.com", "devnet").await
+        // Semua endpoint dicoba, return hasil terakhir
+        self.check_sol_rpc(pubkey, "https://api.mainnet-beta.solana.com", "mainnet").await
     }
 
     async fn check_sol_rpc(
@@ -123,7 +138,30 @@ impl AlchemyValidator {
         &self,
         address: &str,
     ) -> Result<OnChainResult, Box<dyn std::error::Error + Send + Sync>> {
-        let url = format!("https://eth-mainnet.g.alchemy.com/v2/{}", self.api_key);
+        // Coba beberapa public ETH RPC
+        let alchemy_url = format!("https://eth-mainnet.g.alchemy.com/v2/{}", self.api_key);
+        let urls = [
+            alchemy_url.as_str(),
+            "https://eth.llamarpc.com",
+            "https://rpc.ankr.com/eth",
+            "https://cloudflare-eth.com",
+        ];
+
+        for url in urls {
+            match self.try_check_ethereum(address, url).await {
+                Ok(r) => return Ok(r),
+                Err(e) => tracing::debug!("ETH RPC {} failed: {}", url, e),
+            }
+        }
+        Err("All ETH RPC endpoints failed".into())
+    }
+
+    async fn try_check_ethereum(
+        &self,
+        address: &str,
+        url: &str,
+    ) -> Result<OnChainResult, Box<dyn std::error::Error + Send + Sync>> {
+        let url = url.to_string();
 
         let bal: serde_json::Value = self.client.post(&url)
             .json(&json!({"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":[address,"latest"]}))
