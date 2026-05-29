@@ -1,3 +1,8 @@
 config.toml
 scanner.db
 target/
+*.log
+.env
+.DS_Store
+.vscode/
+.idea/

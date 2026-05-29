@@ -1,3 +1,6 @@
+# Copy this file to config.toml and fill in your secrets.
+# config.toml is gitignored and must NEVER be committed.
+
 [github]
 token = ""          # optional — increases rate limit from 10 to 30 req/min
 keywords = [
