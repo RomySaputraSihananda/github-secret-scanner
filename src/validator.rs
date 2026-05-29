@@ -107,8 +107,10 @@ Respond ONLY in JSON: {{"is_real": true/false, "reason": "one sentence explanati
 
         let raw = &or_resp.choices[0].message.content;
         let json_str = extract_json(raw);
-        let result: ValidationResult = serde_json::from_str(json_str)
-            .map_err(|e| format!("Validation parse error: {e}\nRaw: {raw}"))?;
+
+        // Try strict parse first, fall back to extracting is_real from raw text
+        let result = serde_json::from_str::<ValidationResult>(json_str)
+            .unwrap_or_else(|_| parse_fallback(raw));
 
         Ok(result)
     }
@@ -119,6 +121,18 @@ fn extract_json(text: &str) -> &str {
         return &text[start..=end];
     }
     text
+}
+
+// Fallback: if JSON is malformed, look for is_real true/false in raw text
+fn parse_fallback(text: &str) -> ValidationResult {
+    let lower = text.to_lowercase();
+    let is_real = lower.contains("\"is_real\": true")
+        || lower.contains("\"is_real\":true")
+        || lower.contains("is_real: true");
+    ValidationResult {
+        is_real,
+        reason: "parsed via fallback".to_string(),
+    }
 }
 
 #[cfg(test)]

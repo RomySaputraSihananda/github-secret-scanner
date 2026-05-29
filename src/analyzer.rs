@@ -26,8 +26,8 @@ static PATTERNS: Lazy<Vec<Pattern>> = Lazy::new(|| {
             .unwrap(),
         },
         Pattern {
-            label: "Ethereum private key (hex 64)",
-            re: Regex::new(r"(?:0x)?[0-9a-fA-F]{64}").unwrap(),
+            label: "Ethereum private key (0x hex)",
+            re: Regex::new(r"0x[0-9a-fA-F]{64}").unwrap(),
         },
         Pattern {
             label: "AWS Access Key",

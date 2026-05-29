@@ -78,22 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             match validator.validate(&content, &result.secrets).await {
                                 Ok(v) if v.is_real => {
                                     info!("OpenRouter confirmed {}/{}: {}", item.repository.full_name, item.path, v.reason);
-                                    match alchemy.validate(&content).await {
-                                        Some(chain) if chain.is_active => {
-                                            info!("Alchemy confirmed wallet {} ({:.4} SOL)", chain.address, chain.balance_sol);
-                                            let mut enriched = result.secrets.clone();
-                                            enriched.push(format!("Wallet: `{}` — {:.4} SOL", chain.address, chain.balance_sol));
-                                            if let Err(e) = alerter.send(&item.repository.full_name, &item.path, &enriched, &content, &item.html_url).await {
-                                                error!("Telegram alert failed: {}", e);
-                                            }
-                                        }
-                                        Some(chain) => {
-                                            info!("Wallet {} has no balance/history — skip", chain.address);
-                                        }
-                                        None => {
-                                            info!("Could not extract wallet address from {}/{} — skip", item.repository.full_name, item.path);
-                                        }
-                                    }
+                                    send_with_alchemy(&alchemy, &alerter, &item.repository.full_name, &item.path, &result.secrets, &content, &item.html_url).await;
                                 }
                                 Ok(v) => {
                                     info!("False positive in {}/{}: {}", item.repository.full_name, item.path, v.reason);
@@ -149,19 +134,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if result.found {
                             match validator.validate(&added, &result.secrets).await {
                                 Ok(v) if v.is_real => {
-                                    info!("Confirmed secret in commit {}/{} ({}): {}", repo, file.filename, &commit.sha[..8], v.reason);
-                                    if let Err(e) = alerter
-                                        .send(
-                                            repo,
-                                            &file.filename,
-                                            &result.secrets,
-                                            &added,
-                                            &commit.html_url,
-                                        )
-                                        .await
-                                    {
-                                        error!("Telegram alert failed: {}", e);
-                                    }
+                                    info!("OpenRouter confirmed commit {}/{} ({}): {}", repo, file.filename, &commit.sha[..8], v.reason);
+                                    send_with_alchemy(&alchemy, &alerter, repo, &file.filename, &result.secrets, &added, &commit.html_url).await;
                                 }
                                 Ok(v) => {
                                     info!("False positive in commit {}/{}: {}", repo, file.filename, v.reason);
@@ -179,5 +153,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         info!("Cycle complete. Sleeping {}s", cfg.github.interval_secs);
         tokio::time::sleep(Duration::from_secs(cfg.github.interval_secs)).await;
+    }
+}
+
+async fn send_with_alchemy(
+    alchemy: &alchemy::AlchemyValidator,
+    alerter: &alerter::Alerter,
+    repo: &str,
+    path: &str,
+    secrets: &[String],
+    content: &str,
+    link: &str,
+) {
+    match alchemy.validate(content).await {
+        Some(chain) if chain.is_active => {
+            info!("Alchemy confirmed wallet {} ({:.4} SOL)", chain.address, chain.balance_sol);
+            let mut enriched = secrets.to_vec();
+            enriched.push(format!("Wallet: `{}` — {:.4} SOL", chain.address, chain.balance_sol));
+            if let Err(e) = alerter.send(repo, path, &enriched, content, link).await {
+                error!("Telegram alert failed: {}", e);
+            }
+        }
+        Some(chain) => {
+            info!("Wallet {} inactive (0 SOL, no tx) — skip", chain.address);
+        }
+        None => {
+            // Tidak bisa extract Solana wallet (mungkin ETH key / API key) — alert langsung
+            info!("No Solana wallet extractable, alerting directly for {}/{}", repo, path);
+            if let Err(e) = alerter.send(repo, path, secrets, content, link).await {
+                error!("Telegram alert failed: {}", e);
+            }
+        }
     }
 }
