@@ -24,6 +24,7 @@ pub struct OpenRouterConfig {
 pub struct TelegramConfig {
     pub bot_token: String,
     pub chat_id: String,
+    pub message_thread_id: Option<i64>,
 }
 
 pub fn load(path: &str) -> Result<Config, Box<dyn std::error::Error>> {

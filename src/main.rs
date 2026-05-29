@@ -21,6 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let alerter = alerter::Alerter::new(
         cfg.telegram.bot_token.clone(),
         cfg.telegram.chat_id.clone(),
+        cfg.telegram.message_thread_id,
     );
 
     info!(

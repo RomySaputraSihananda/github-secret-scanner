@@ -7,20 +7,24 @@ struct TelegramMessage {
     text: String,
     parse_mode: String,
     disable_web_page_preview: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_thread_id: Option<i64>,
 }
 
 pub struct Alerter {
     client: Client,
     bot_token: String,
     chat_id: String,
+    message_thread_id: Option<i64>,
 }
 
 impl Alerter {
-    pub fn new(bot_token: String, chat_id: String) -> Self {
+    pub fn new(bot_token: String, chat_id: String, message_thread_id: Option<i64>) -> Self {
         Self {
             client: Client::new(),
             bot_token,
             chat_id,
+            message_thread_id,
         }
     }
 
@@ -49,6 +53,7 @@ impl Alerter {
             text,
             parse_mode: "Markdown".to_string(),
             disable_web_page_preview: true,
+            message_thread_id: self.message_thread_id,
         };
 
         let url = format!(
