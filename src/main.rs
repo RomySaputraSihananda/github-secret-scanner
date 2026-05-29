@@ -4,6 +4,7 @@ mod analyzer;
 mod cache;
 mod config;
 mod events;
+mod pastebin;
 mod poller;
 mod validator;
 
@@ -55,24 +56,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         error!("Failed to send startup notification: {}", e);
     }
 
-    let (cache2, poller2, validator2, alchemy2, alerter2) = (
-        cache.clone(), poller.clone(), validator.clone(), alchemy.clone(), alerter.clone(),
-    );
     let keywords = cfg.github.keywords.clone();
     let interval_secs = cfg.github.interval_secs;
+    let token = cfg.github.token.clone();
 
-    let keyword_task = tokio::spawn(async move {
-        keyword_scan_loop(keywords, interval_secs, cache2, poller2, validator2, alchemy2, alerter2).await;
+    let keyword_task = tokio::spawn({
+        let (c, p, v, a, al) = (cache.clone(), poller.clone(), validator.clone(), alchemy.clone(), alerter.clone());
+        async move { keyword_scan_loop(keywords, interval_secs, c, p, v, a, al).await; }
     });
 
-    let token = cfg.github.token.clone();
-    let events_task = tokio::spawn(async move {
-        events_scan_loop(token, cache, poller, validator, alchemy, alerter).await;
+    let events_task = tokio::spawn({
+        let (c, p, v, a, al) = (cache.clone(), poller.clone(), validator.clone(), alchemy.clone(), alerter.clone());
+        async move { events_scan_loop(token, c, p, v, a, al).await; }
+    });
+
+    let pastebin_task = tokio::spawn({
+        let (c, v, a, al) = (cache.clone(), validator.clone(), alchemy.clone(), alerter.clone());
+        async move { pastebin_scan_loop(c, v, a, al).await; }
     });
 
     tokio::select! {
         _ = keyword_task => error!("Keyword scan task exited unexpectedly"),
         _ = events_task => error!("Events scan task exited unexpectedly"),
+        _ = pastebin_task => error!("Pastebin scan task exited unexpectedly"),
     }
 
     Ok(())
@@ -236,6 +242,34 @@ async fn process_finding(
     }
 }
 
+
+async fn pastebin_scan_loop(
+    cache: SharedCache,
+    validator: SharedValidator,
+    alchemy: SharedAlchemy,
+    alerter: SharedAlerter,
+) {
+    let mut poller = pastebin::PastebinPoller::new();
+    loop {
+        match poller.poll().await {
+            Ok(pastes) => {
+                info!("[pastebin] {} new pastes", pastes.len());
+                for paste in pastes {
+                    let cache_key = format!("pastebin/{}", paste.key);
+                    { if cache.lock().await.is_seen(&cache_key) { continue; } }
+
+                    let result = analyzer::analyze(&paste.content);
+                    if result.found {
+                        process_finding(&validator, &alchemy, &alerter, "pastebin.com", &paste.key, &result.secrets, &paste.content, &paste.url, "[pastebin]").await;
+                    }
+                    cache.lock().await.mark_seen(&cache_key).ok();
+                }
+            }
+            Err(e) => warn!("[pastebin] Poll error: {}", e),
+        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+    }
+}
 
 async fn send_with_alchemy(
     alchemy: &SharedAlchemy,
